@@ -21,20 +21,26 @@
 3. 增量式PID算法实现转速闭环稳速
 4. USART1(9600波特率)串口打印转速、PWM、PID参数
 
+## 项目版本说明
+本项目包含两个版本，分别用于不同阶段的开发与调试：
+- 硬件实现版（`main.c`）：基于STM32 HAL库实现，支持GPIO启停、PWM输出，可对接真实电机
+- 纯仿真测试版（`main_simulation.c`）：无硬件依赖，通过模拟变量测试PID算法，用于快速调参和验证逻辑
+
 ## 编译&运行步骤
 1. 使用 STM32CubeMX 重新生成工程（可选，直接用现有工程也可）
-2. Keil MDK5 打开 `motor-pid-control/Motor_PID_Control.uvprojx` 编译
+2. Keil MDK5 打开 `stm32-motor-pid-control/Motor_PID_Control.uvprojx` 编译
 3. 开启软件仿真模式运行程序
 4. 串口助手/Keil内置串口窗口设置 9600 波特率，查看运行日志
 5. 可通过Keil寄存器、逻辑分析仪观察引脚电平与PWM波形
 
 ## 目录结构
-arm-bsp-learing/
-├── motor-pid-control/         # Keil工程与核心代码
-│   ├── Core/                  # 业务代码（main.c、pid.c等）
-│   ├── Drivers/               # STM32 HAL库驱动文件
-│   └── Motor_PID_Control/     # Keil工程配置文件
-├── .gitignore                 # Git忽略文件配置（过滤编译临时文件）
-└── README.md                  # 项目说明文档（本文件）
+stm32-motor-pid-control/
+├── motor-pid-control/    # Keil工程与核心代码（硬件版）
+│   ├── Core/             # 业务代码（main.c、pid.c等）
+│   ├── Drivers/          # STM32 HAL库驱动文件
+│   └── Motor_PID_Control/ # Keil工程配置文件
+├── main_simulation.c     # 纯仿真测试版PID代码（无硬件依赖，Keil可直接调试）
+├── .gitignore            # Git忽略文件配置（过滤编译临时文件）
+└── README.md             # 项目说明文档（本文件）
 本项目旨在展示嵌入式C语言开发、外设驱动与控制算法的工程实践能力，
 适配汽车电子、嵌入式控制岗位的技能要求。
