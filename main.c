@@ -1,6 +1,14 @@
+/*****************************************
+ * 项目：STM32电机PID闭环控制
+ * 文件：main.c
+ * 说明：大三嵌入式学习实践项目
+ * 功能：系统初始化 + 主业务逻辑
+ *****************************************/
+
+#include <stdio.h>
+#include <stdlib.h>
+// STM32 HAL库总头文件
 #include "stm32f1xx_hal.h"
-#include "stdio.h"
-#include "stdlib.h"
 
 UART_HandleTypeDef huart1;
 TIM_HandleTypeDef htim2;
@@ -21,7 +29,7 @@ uint16_t pwm_duty = 500; // 初始占空比50%
 
 // 串口printf重定向
 int fputc(int ch, FILE *f) {
-    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 10);
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 100);
     return ch;
 }
 
@@ -35,17 +43,27 @@ void PID_Init(PID_HandleTypeDef *pid, float kp, float ki, float kd, float setpoi
     pid->prev_error = 0;
 }
 
-// PID计算
+// PID（计算增量式，带积分限幅）
 float PID_Compute(PID_HandleTypeDef *pid, float measured) {
     float error = pid->setpoint - measured;
+    // 1. 误差累加（积分项）+ 积分限幅，防止积分饱和
     pid->integral += error;
+    if (pid->integral > 1000) pid->integral = 1000;
+    if (pid->integral < -1000) pid->integral = -1000;
+
+    // 2. 微分项
     float derivative = error - pid->prev_error;
+
+    // 3. 计算PID输出
     float output = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
-    pid->prev_error = error;
-    
-    // 限制输出范围（0-999，对应PWM占空比）
+
+    // 4. 限制输出范围（0-999，对应PWM占空比）
     if (output > 999) output = 999;
     if (output < 0) output = 0;
+
+    // 5. 更新上一次误差
+    pid->prev_error = error;
+
     return output;
 }
 
@@ -88,26 +106,35 @@ static void MX_TIM2_Init(void) {
     TIM_MasterConfigTypeDef sMasterConfig = {0};
     TIM_OC_InitTypeDef sConfigOC = {0};
 
+    // 1. 定时器基础配置
     htim2.Instance = TIM2;
-    htim2.Init.Prescaler = 71;
+    htim2.Init.Prescaler = 71;          // 72MHz / (71+1) = 1MHz
     htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim2.Init.Period = 999;
+    htim2.Init.Period = 999;            // 1MHz / (999+1) = 1kHz PWM 频率
     htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    // 关键：开启自动重装载预装载，PWM更新无毛刺
+    htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
     HAL_TIM_Base_Init(&htim2);
 
+    // 2. 配置时钟源（内部时钟）
     sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
     HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig);
 
+    // 3. 主模式配置（不需要触发信号，禁用主从模式）
     sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
     sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
     HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig);
 
+    // 4. PWM通道配置（通道1）
     sConfigOC.OCMode = TIM_OCMODE_PWM1;
-    sConfigOC.Pulse = pwm_duty;
+    sConfigOC.Pulse = pwm_duty;          // 初始占空比，对应变量pwm_duty
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
     HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+    // 5. 启动定时器和PWM通道
+    HAL_TIM_Base_Start(&htim2);          // 先启动定时器
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // 再启动PWM通道
 }
 
 // GPIO初始化（按键、LED、电机使能）
@@ -151,28 +178,35 @@ int main(void) {
 
     printf("System Initialized!\r\n");
     while (1) {
-        // 按键仿真：PA0低电平=按下，切换电机状态
-        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
-            HAL_Delay(20); // 消抖
-            if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
-                motor_run = !motor_run;
-                if (motor_run) {
-                    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // LED亮
-                    printf("Motor Started\r\n");
+       // 按键仿真：PA0低电平=按下，切换电机状态
+       if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
+           HAL_Delay(20); // 按下消抖
+           if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
+               motor_run = !motor_run;
+
+               if (motor_run) {
+                   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+                   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // LED亮
+                   printf("Motor Started\r\n");
                 } else {
                     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
                     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // LED灭
                     printf("Motor Stopped\r\n");
-                }
-                while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET); // 等待松开
-            }
         }
+
+        // 等待按键松开，防止长按反复触发
+        while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET);
+    }
+}
 
         if (motor_run) {
             // 无硬件仿真：用PWM值+随机波动模拟转速
             float simulated_speed = pwm_duty * 1.8f + (rand() % 100 - 50);
             
+            // 限制转速范围（0-1500，避免出现负数或过大值）
+            if (simulated_speed < 0) simulated_speed = 0;
+            if (simulated_speed > 1500) simulated_speed = 1500;
+
             // PID计算新的PWM值
             pwm_duty = (uint16_t)PID_Compute(&motor_pid, simulated_speed);
             
